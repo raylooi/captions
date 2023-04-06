@@ -1,0 +1,323 @@
+Let's now take a look at how neural networks actually work.
+In general, the simplest version of the neural network
+has one layer, and you can think of it
+as multiple regression algorithms running simultaneously,
+one for each of the classes we're trying to predict.
+So here's a simple case where we're
+trying to take the same data, which
+will be our x inputs plus the set to 1 bias.
+We will, of course, have weights times each of these.
+And there is, of course, going to be
+a weight from each of the inputs to each of our activation units
+or essentially regression algorithms.
+Essentially, this one will predict class 3.
+This one will predict class 2.
+This one will predict class 1.
+And this will be using the familiar one
+versus rest configuration, where essentially each
+of these activation units gets trained
+to differentiate between things that are part of its class
+and are not.
+And the hope is that every instance
+will show up with exactly one value set, for instance,
+010, to predict class 2.
+This is the simplest form of network.
+It is single layer.
+And it's really just a generalization
+of the familiar techniques that we've seen for regression.
+We can train it much the same way.
+Of course, things can get more interesting
+in that we can create multilayer or deeper networks.
+When people talk about deep neural networks,
+that's really what they're saying.
+There are multiple so-called hidden layers in between.
+Now, the interesting thing about a deep neural network
+is that training, which, of course, involves
+putting inputs along here and giving feedback
+on the error or the loss with respect to predicted class
+versus actual class, this training will separately
+set weights for this individual activation unit,
+this one and this one.
+And ultimately, each of them will learn essentially
+to predict an intermediate feature,
+which will be different from the others
+because each of our activation units
+essentially starts with different random settings
+for the weights.
+And as you give feedback, they'll each differentiate
+in different ways that are complementary.
+So basically, the important thing here
+is that the deep neural network actually
+learns to extract meaningful features
+in these hidden or intermediate layers.
+Let's now go back to the case of the simple single layer
+network and look at how it works in more detail.
+So of course, as we already alluded to,
+you're going to be training multiple of these neurons,
+one for each class, on the same input.
+So let's take a look at how this actually
+works with an example.
+We're going to have two features, x1 and x2
+as our inputs.
+Of course, note that that also means
+we will have a bias x0 equals 1.
+And we're going to build essentially two predictors,
+one for the AND function.
+So it should learn x1 and x2.
+This is the Boolean function.
+And then we will have a second one,
+which learns the Boolean OR function, x1 or x2.
+We're going to use a simple function called
+HEAVYSIDE to be our activation function.
+And that's basically going to look like this, where
+it essentially gives you true or false,
+depending on whether x is less than 0 or greater than
+or equal to 0.
+So note that this one is actually
+a very particular function that usually we
+don't use much in real networks because it's not
+differentiable.
+But for our particular example, it
+makes for a simpler set of use cases.
+Now, usually for real neural networks,
+we're not going to use HEAVYSIDE because it's not really
+suitable for gradient descent because of its stair-step
+nature.
+But nonetheless, it makes for a convenient example
+to illustrate the principles.
+So we're going to use it here.
+The basic setup will then be the diagram that we see here.
+So again, we can see that we have the bias, which
+is also x0.
+That will be value 1.
+And then we are going to have a series of weights.
+So we can see there's a weight vector here
+that corresponds to our activation unit 1.
+And there similarly will be a weight vector
+along these lines, which will be for our second activation
+unit.
+And of course, what will happen is we will do x dot with w1
+star to be our first activation unit,
+and x dot w2 star to be our second activation unit.
+Each of these will be what we see in the sigma here.
+And then we'll apply our HEAVYSIDE function over each.
+So this first one corresponds to this.
+And we'll ultimately have to be x1 and x2.
+The second one corresponds to here.
+And we'll ultimately learn x1 or x2.
+OK, so how do we actually train?
+Well, we do this actually in a completely incremental way.
+Essentially, we're going to take each sample, which I'll just
+call x, although we might call it x sub i.
+And we'll make a prediction for class j
+by multiplying our input x by all of the wj's in a vector.
+And of course, then we apply our activation function,
+which in this case was a HEAVYSIDE.
+So for our particular unit 1 that
+tries to predict x1 and x2, if we're given x of 0, 1
+and weights like this, of course, what we first have to do
+is take our original x and add the bias.
+So now we get a vector 1, 0, 1.
+We multiply now our x prime by our weight vector.
+And we get a value of 0.11, which is greater than 0.
+So therefore, our prediction is y1 equals 1.
+Now immediately, we can train.
+We can update our w of j into the next round
+by multiplying our error.
+So in this case, y minus y hat times the value of x
+times our learning rate eta, which
+looks exactly like we saw with stochastic gradient descent.
+And we're going to repeat this process for many rounds
+or epochs.
+So let's take a look at training in action.
+Here, we're going to learn OR.
+So this is really the activation unit number 2
+from our example.
+The truth table, therefore, the actual outputs
+of the function for Boolean OR are as follows.
+0 OR OR is 0.
+Everything else is a 1.
+When we initialize our neural network,
+we're going to set the weights to a random set of values.
+So we're going to have weight 2, 0, weight 2, 1, and weight 2,
+2 in this case.
+Those are for our initial bias, our x1 and our x2.
+So this is our initial set of values.
+Again, recall that we have three of these
+because the 0th one, the initial one, is for the bias.
+OK, we now start with the first input,
+which will be the first entry from our truth table.
+So in this case, we're training on x equals 0, 0.
+Of course, the first thing we need
+to do is add our bias, so a 0th element with value 1.
+And now we can multiply x by w2 star, or w2.
+And if we do this, it'll turn out
+the product is actually 0 because we have two 0s here
+and one 0 here.
+Now, if we look at that, we can apply Heaviside to it.
+Actually, Heaviside on 0 is 1 because Heaviside
+returns 1 for anything greater than or equal to 0.
+So our y hat is 1.
+The actual value, the real value of y, should be 0.
+So clearly, we have an error.
+Now, to do our weight update, we compute delta of w2
+by taking the learning rate times
+the difference between the actual and predicted values
+times our value of y that we tested on.
+And so in this case, our learning rate
+is going to be 0.01 times 0 minus 1 times 1.00.
+And that will give us an update like this.
+So we can see that we're going to adjust the 0th entry right
+here by negative 0.1 and leave the others the same.
+We will immediately do this update because, again, we're
+essentially doing stochastic gradient descent here.
+So now we will have a new version of our weights.
+You can see the lighter blue color here
+indicates what was updated.
+Now we're going to train on the next value.
+So again, we pull it down.
+We extend it with a 1.
+We multiply.
+Now we get 0.69.
+The heavy side on 0.69 will, again, be 1.
+In this case, we have a 1 and a 1.
+So the error is 0.
+So the delta w2 will also be 0.
+So this is good.
+Now we go to the next training example.
+Again, we extend it.
+We multiply.
+Now we get negative 0.31.
+So heavy side on a negative will be 0.
+In contrast, the y value is 1.
+So now we have an error.
+So again, eta times the difference between y and y hat
+times our value of x will give us a weight update,
+as we see here.
+We will immediately apply it.
+Now we train on 1, 1, extend it with a 1.
+Do our product at 0.41.
+We now do our prediction, which is a 1.
+The actual value of y is actually a 1.
+So we compute our update.
+And in this case, there is nothing to change.
+And we repeat this process through multiple epochs
+until eventually we end up with the weights set
+to define this particular line.
+And essentially, everything to the right of that line
+will be predicted as true.
+Everything below will be predicted as false.
+This is now the OR function.
+Great.
+So we saw an example with OR.
+Of course, in parallel, we're doing the same thing with AND.
+And in general, what we learn from the perceptron
+is going to be some kind of linear decision boundary,
+much like with logistic regression.
+But here, we're going to predict simply the class, not
+a probability of the class.
+And it's guaranteed that with enough epochs,
+the perceptron or the single activation unit
+will converge as long as the classes are linearly separable.
+How do we actually train a perceptron or simple neural
+network like we saw in our examples?
+Essentially, we can do this in Scikit-learn
+just by calling linear model perceptron.
+As usual, we would fit to the training data
+and predict with the test data.
+And this works pretty smoothly.
+Now, perhaps surprisingly, this is
+one of the few neural networks capabilities
+that's built into Scikit-learn.
+The developers of Scikit-learn decided early on
+that they do not want to be an overall neural networks
+library and instead left that to other tool kits
+that we'll be talking about in a moment.
+Also, perhaps interestingly, Apache Spark
+only has very limited deep learning capabilities as well.
+So this brings us to a new family of tools, namely
+neural network frameworks.
+If you follow the AI tech space at all,
+you might have heard of Google's TensorFlow or perhaps
+Apache MXNet or PyTorch.
+All of these frameworks are actually
+quite similar in spirit.
+They allow you to define multiple layers
+in a neural network.
+And then from that, they generate
+graphs of linear algebra operators working on tensors,
+where tensors are essentially a generalization of me.
+This style of computation actually, in many ways,
+looks similar to Apache Spark's notion
+of relational algebra operators over large relation.
+Now, out of these different neural network frameworks,
+PyTorch has recently emerged as essentially the winner.
+It's the most popular, the most widely used,
+and the most widely supported.
+So indeed, we will be adopting PyTorch for this course.
+It is, after all, the preeminent toolkit today
+for deep learning, especially deep learning with GPUs.
+And essentially, when you write PyTorch code,
+it ultimately compiles this down into CUDA code
+that runs on NVIDIA GPUs or the equivalent
+for other processors.
+Now, PyTorch by itself is a single GPU package,
+but there is another library called Horovod,
+which is useful for distributing PyTorch computations
+across multiple computers and also across multiple GPUs.
+So we'll be taking a look at this
+as we try to scale our deep learning tech.
+Now, what does a PyTorch program actually look like?
+Well, here's a sketch to give you a sense of this.
+Almost always, you are going to define
+your neural network model
+by subclassing Torch neural network module.
+And essentially, you define a series of layers
+by making them into member variables
+and then assigning them using torch.nn.something or other,
+which we'll talk about in more detail.
+Sometimes you'll also define a forward propagation function,
+as we see here, where you take the input,
+which in this case is the input
+to the entire neural network,
+and then each layer computes an output
+based on its operations over the input.
+And that composes through multiple steps
+or layers through the neural network
+until you eventually return the result.
+The rest of a PyTorch program
+typically instantiates the model.
+It calls model.train to put the model into training mode.
+And then there's a loop,
+which takes a series of input instances from the data,
+iterates over it in many epochs,
+does a computation by applying the model
+to the data's X inputs,
+in other words, the training instance.
+That produces a series of outputs,
+which are the predictions.
+From that, we will take the outputs
+and diff them with the actual labels
+to get a loss after we apply a loss function.
+Then we backward propagate the error
+to adjust the weights.
+And we'll talk more about this very soon.
+So let's summarize what we've seen so far
+about single layer neural networks.
+In general, what we have is a vector of artificial neurons
+that are instantiated as a single layer.
+We can use this to produce one versus all classifiers
+where each output makes a separate prediction.
+And essentially we can train all of these
+different perceptrons simultaneously
+based on an update a lot like gradient descent
+with a learning rate.
+A perception is guaranteed to converge
+for linearly separable data.
+But of course, not all data is linearly separable.
+And that requires us to create multi-layer networks
+as we started to see in our example with PyTorch.
+There are lots of frameworks besides PyTorch,
+but it's going to be our focus.
+And we're gonna see more about how to use it
+over the next few lectures.

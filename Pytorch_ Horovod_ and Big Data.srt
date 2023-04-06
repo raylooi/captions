@@ -1,0 +1,608 @@
+1
+00:00:00,000 --> 00:00:15,000
+When deep neural networks were first proposed, the notion of using a GPU to help train neural networks at scale over hundreds of millions of images or bits of text was itself considered a really, really big data problem.
+
+2
+00:00:15,000 --> 00:00:18,000
+But over time, we've gotten a lot more ambitious.
+
+3
+00:00:18,000 --> 00:00:30,000
+Today, as people are trying to build GPT-3 and GPT-4 and other large language models or train over huge amounts of video data, etc.
+
+4
+00:00:30,000 --> 00:00:37,000
+They've had to move beyond single GPU training to many GPUs often on a computer cluster.
+
+5
+00:00:37,000 --> 00:00:47,000
+So we'll talk briefly about some of the key ideas behind scale up and a package called Horovod in this next segment.
+
+6
+00:00:47,000 --> 00:00:55,000
+Before we do that, it's worth recalling how it is that we tend to scale up computation over large amounts of data.
+
+7
+00:00:55,000 --> 00:00:58,000
+We saw really two main ideas.
+
+8
+00:00:58,000 --> 00:01:07,000
+Both of them are here to take advantage of the fact that we might have multiple CPUs or multiple GPUs or multiple hardware or all of the above.
+
+9
+00:01:07,000 --> 00:01:17,000
+And they are all seeking to allow each of these independent processing units to work in parallel on different pieces of the problem without doing too much communication.
+
+10
+00:01:17,000 --> 00:01:25,000
+So we saw sharding where we take our input data and we split it, usually row wise, across different computers on a network.
+
+11
+00:01:25,000 --> 00:01:33,000
+And then we allow different machines to execute programs or more specifically queries independently in parallel.
+
+12
+00:01:33,000 --> 00:01:51,000
+We also saw a second technique, which was single instruction multiple data or SIMD, which are commonly called vector instructions, where we can specify one computation to do over batches of records or values and their special hardware to do things in parallel.
+
+13
+00:01:51,000 --> 00:02:02,000
+Both of these are based on this notion that we express our computation using high level bulk operations that can be parallelized in some particular way.
+
+14
+00:02:02,000 --> 00:02:07,000
+Some of these operations can be done fully in parallel. Some of them require a bit of synchronization.
+
+15
+00:02:07,000 --> 00:02:11,000
+And for that, let's recall how we do SQL query evaluation.
+
+16
+00:02:11,000 --> 00:02:23,000
+Recall that when we have an SQL query or a pandas program, we break it into a tree of operators, an expression, which looks something like this.
+
+17
+00:02:23,000 --> 00:02:28,000
+We have a selection followed by a join followed by a group by.
+
+18
+00:02:28,000 --> 00:02:37,000
+And each of these operators works over tables, but in fact, it tends to work over individual rows of the tables or collections thereof.
+
+19
+00:02:37,000 --> 00:02:48,000
+So you'll recall that the select operator had this nice property that it could be done independently and in parallel across every single tuple in the input relation.
+
+20
+00:02:48,000 --> 00:02:56,000
+So we could scale this with as many processors or as many cores or ultimately as many machines as we might like.
+
+21
+00:02:56,000 --> 00:02:59,000
+Join was slightly more constrained.
+
+22
+00:02:59,000 --> 00:03:12,000
+We can do portions of the join in parallel, but all of the values from our A and B relations that have the same join keys have to go to the same machine and it has to work on all of them together.
+
+23
+00:03:12,000 --> 00:03:19,000
+So we have a lot of parallelism, but it's based on join key values instead of individual tuples.
+
+24
+00:03:19,000 --> 00:03:24,000
+Then we had group by, which was kind of similar to join.
+
+25
+00:03:24,000 --> 00:03:29,000
+It can be done independently, but independently across individual groups.
+
+26
+00:03:29,000 --> 00:03:41,000
+Every set of tuples with the same grouping key generally in the abstract needs to be done in one operation, and we can only parallelize across the groups.
+
+27
+00:03:41,000 --> 00:03:54,000
+So we saw how to take advantage of that in Apache Spark and similar systems using the notion of repartitioning or sharding or the exchange operator, depending on how to talk about it.
+
+28
+00:03:54,000 --> 00:03:57,000
+Some people also call this shuffle.
+
+29
+00:03:57,000 --> 00:04:03,000
+So here's an example of our query now running across two different computers.
+
+30
+00:04:03,000 --> 00:04:06,000
+I'm drawing a line across to show where the different computers are.
+
+31
+00:04:06,000 --> 00:04:11,000
+So the different computers are, they're each executing the same evaluation plan.
+
+32
+00:04:11,000 --> 00:04:13,000
+And so we start with a select.
+
+33
+00:04:13,000 --> 00:04:20,000
+In this case, the select is going to operate on different regions of our data from our input A.
+
+34
+00:04:20,000 --> 00:04:28,000
+And of course, different regions can be selected in parallel, producing a series of sub results.
+
+35
+00:04:28,000 --> 00:04:43,000
+So in this case, if my data is partitioned correctly on the join key, perhaps we can actually do a join between that result and some portion of some other table B, which also has to be aligned correctly on the join key.
+
+36
+00:04:43,000 --> 00:04:47,000
+That produces some intermediate results that we see here.
+
+37
+00:04:47,000 --> 00:04:50,000
+And similarly on the second machine, we will get the same thing.
+
+38
+00:04:50,000 --> 00:05:09,000
+Now, if we want to do a group by on a grouping key that is not our join key, then we need to do this repartition operation that we see in between shuffling data back and forth across these machines until all of the G values that match end up at one machine or the other machine.
+
+39
+00:05:09,000 --> 00:05:15,000
+And so now the grouping can be done in parallel across different groups on our different machine.
+
+40
+00:05:15,000 --> 00:05:19,000
+So that's how things work for SQL.
+
+41
+00:05:19,000 --> 00:05:25,000
+Do we have a similar notion of high level operations for neural networks?
+
+42
+00:05:25,000 --> 00:05:27,000
+Well, fortunately, we actually do.
+
+43
+00:05:27,000 --> 00:05:35,000
+If you think about our neural networks in general, they have a series of layers.
+
+44
+00:05:35,000 --> 00:05:43,000
+Maybe this is layer one, which is comprised of a series of operations where we take our input matrix.
+
+45
+00:05:43,000 --> 00:05:45,000
+This is our training data, let's say.
+
+46
+00:05:45,000 --> 00:05:51,000
+And we take a series of weights. So this is the weight vector for activation unit one, which is right here.
+
+47
+00:05:51,000 --> 00:05:58,000
+Activation unit one really has a dot product, followed by an activation function, in this case, ReLU.
+
+48
+00:05:58,000 --> 00:06:07,000
+And then we're going to have another one of these happening in parallel for a different activation unit, another activation unit, and so on.
+
+49
+00:06:07,000 --> 00:06:19,000
+So all of these produce different columns in an output matrix, which then gets fed into layer two,
+
+50
+00:06:19,000 --> 00:06:25,000
+which again has activation units comprised of dot product, followed by activation function.
+
+51
+00:06:25,000 --> 00:06:28,000
+And this proceeds through multiple layers.
+
+52
+00:06:28,000 --> 00:06:38,000
+So the feedforward computation consists of a series of dot product ReLU, dot product ReLU, dot product ReLU stages in this particular neural network.
+
+53
+00:06:38,000 --> 00:06:43,000
+Of course, the ReLU could be some other activation function like sigmoid in the general case.
+
+54
+00:06:43,000 --> 00:06:48,000
+So that's great. Can we map this to something parallelizable?
+
+55
+00:06:48,000 --> 00:06:49,000
+Fortunately, the answer is yes.
+
+56
+00:06:49,000 --> 00:06:56,000
+This is where PyTorch and TensorFlow and MXNet work by default on a single GPU.
+
+57
+00:06:56,000 --> 00:07:02,000
+And Horovod will help us parallelize across multiple GPUs and multiple machines.
+
+58
+00:07:02,000 --> 00:07:12,000
+Essentially, all of these platforms under the covers implement specific computation engines that propagate tensors from operation to operation.
+
+59
+00:07:12,000 --> 00:07:20,000
+And they map these down to special hardware, things like your GPU or parallel vector instructions in CPUs.
+
+60
+00:07:20,000 --> 00:07:26,000
+The individual stages of the computation can be split up, kind of akin to sharding,
+
+61
+00:07:26,000 --> 00:07:35,000
+or they can be computed in a series of pipelines where the different multiplications can all be happening simultaneously.
+
+62
+00:07:35,000 --> 00:07:46,000
+And for instance, the outputs of layer number one are fed any pipeline to the simultaneously executing stage number two or layer number two, and so on.
+
+63
+00:07:46,000 --> 00:07:58,000
+So we have both the sort of pipeline version, pipeline to parallelism, and we have different rows and columns, which is kind of equivalent to sharding.
+
+64
+00:07:58,000 --> 00:08:07,000
+In either case, as we saw from the previous example, the feedforward step prediction is fairly natural.
+
+65
+00:08:07,000 --> 00:08:19,000
+And in fact, it can be done with lots of computations in parallel, for instance, using multiple rows of the training data at the same time to do multiple predictions at once.
+
+66
+00:08:19,000 --> 00:08:25,000
+So what makes this much more complicated, though, is we don't just have this feedforward computation.
+
+67
+00:08:25,000 --> 00:08:32,000
+Rather, we have backpropagation. And what is backpropagation involved? Well, basically the output, let's suppose we're looking at this one.
+
+68
+00:08:32,000 --> 00:08:43,000
+The output of our deep neural network eventually goes to an activation unit, which then makes a prediction, which we could call y hat
+
+69
+00:08:43,000 --> 00:08:49,000
+of one here and y hat of two here.
+
+70
+00:08:49,000 --> 00:08:57,000
+And of course, what's going to happen is we take our prediction, we compare it to the actual label from our training data.
+
+71
+00:08:57,000 --> 00:09:13,000
+Then based on the error, we compute a loss, and then the loss gets backpropagated through radiant descent type methods, through backpropagation, all the way through our network.
+
+72
+00:09:13,000 --> 00:09:20,000
+So that is the more complicated part of this computation. Let's see how we can actually make this work at scale.
+
+73
+00:09:20,000 --> 00:09:25,000
+So for that, I'm going to excerpt just one stage and one activation unit from this network.
+
+74
+00:09:25,000 --> 00:09:40,000
+So we can see this dashed here. If we zoom in, then we can think about this particular activation unit as contributing to some arbitrary number of layers in our neural network.
+
+75
+00:09:40,000 --> 00:09:45,000
+So we're just going to show all the layer two, layer three, and so on as a big cloud.
+
+76
+00:09:45,000 --> 00:09:51,000
+Essentially, this activation unit ultimately contributes to some particular prediction.
+
+77
+00:09:51,000 --> 00:09:56,000
+And of course, it might be more than one prediction, but let's assume for the moment we're just doing one prediction.
+
+78
+00:09:56,000 --> 00:10:00,000
+So that's our y hat.
+
+79
+00:10:00,000 --> 00:10:06,000
+Then we compare it at the output stage against the actual y.
+
+80
+00:10:06,000 --> 00:10:21,000
+That becomes the loss. Then through the auto differentiation features of our machine learning toolkit, we convert from the loss to a series of gradients, one for each weight.
+
+81
+00:10:21,000 --> 00:10:26,000
+That is done by figuring out the partial derivatives.
+
+82
+00:10:27,000 --> 00:10:36,000
+Then from the gradients, we take our step size and we use that to compute an adjustment on the weights for every single activation unit.
+
+83
+00:10:36,000 --> 00:10:48,000
+So here we see the kind of total loop from our original training data and weights all the way around through the output of the activation unit, through the rest of the neural network, back into an adjustment to the weights and so on.
+
+84
+00:10:48,000 --> 00:10:53,000
+So we have this loop.
+
+85
+00:10:53,000 --> 00:11:09,000
+Now let's excerpt away a little bit more and instead of showing the loss functions, look at there being an output from this particular activation unit and then an adjustment to the weights comes from somewhere downstream.
+
+86
+00:11:09,000 --> 00:11:20,000
+If we want to now think about computing in parallel, different parts of our training data, training input here,
+
+87
+00:11:20,000 --> 00:11:31,000
+into two different sub-zones. So essentially I'm going to take half of my training data and put it on machine number one and half of my data and I'm going to train using the same neural network and the same weights.
+
+88
+00:11:31,000 --> 00:11:33,000
+So how might this work?
+
+89
+00:11:33,000 --> 00:11:39,000
+Well, basically, we take our initial shard up here.
+
+90
+00:11:39,000 --> 00:11:53,000
+We just create the same neural network as we see before and what we're going to do is take the output of this stage, feed it into all the downstream layers and then compute a loss.
+
+91
+00:11:53,000 --> 00:12:01,000
+And in fact, we're going to compute the loss and an autograd for this first half of the picture above.
+
+92
+00:12:01,000 --> 00:12:06,000
+And in parallel, we're going to do the same thing for the second half of the picture below.
+
+93
+00:12:06,000 --> 00:12:12,000
+And now there's going to be a different loss based on Xshard 0 versus Xshard 1.
+
+94
+00:12:12,000 --> 00:12:19,000
+And we can also compute over each of those a gradient using autograd.
+
+95
+00:12:19,000 --> 00:12:27,000
+And what we're typically going to do is compute those different gradients on our two different halves of this computation separately.
+
+96
+00:12:27,000 --> 00:12:31,000
+They're each going to be done, in fact, on a separate computer.
+
+97
+00:12:31,000 --> 00:12:39,000
+Now we need to update the weights on Machine 0 and Machine 1 so that they are the same.
+
+98
+00:12:39,000 --> 00:12:43,000
+We're trying to do the same computation with the same weights on two machines.
+
+99
+00:12:43,000 --> 00:12:59,000
+So to do that, we're going to take our different gradients computed on each of these machines and average the gradients across everything and apply our weight update based on those averages and update all the copies of our weight vector.
+
+100
+00:12:59,000 --> 00:13:09,000
+So that's the basic idea. We do sharded computation effectively over different parts of the training data all the way through all the stages of the computation.
+
+101
+00:13:09,000 --> 00:13:15,000
+Then we compute a gradient for each partition. Then we average those gradients.
+
+102
+00:13:15,000 --> 00:13:23,000
+We use that to adjust our weights. We adjust them consistently across all the machines and we repeat.
+
+103
+00:13:23,000 --> 00:13:28,000
+So now we've gone from one GPU or one machine to more than one.
+
+104
+00:13:28,000 --> 00:13:42,000
+So how does this work across multiple computers? Well, for Apache Spark, what we did was we had the different machines communicate to a limited extent under the management of a coordinator.
+
+105
+00:13:42,000 --> 00:13:48,000
+And they generally shuffle data around using sharding or repartition techniques.
+
+106
+00:13:48,000 --> 00:13:57,000
+For distributed computation and coordination in a training loop, we're not so worried about sharding data based on values.
+
+107
+00:13:57,000 --> 00:14:16,000
+But what we have to do is in parallel compute losses and gradients across different subsets of our training data, then average them in a consistent way across all of the data, and then propagate the updates to all of the machines for the next training epic.
+
+108
+00:14:18,000 --> 00:14:25,000
+So how might this work? Well, let's take a simplified abstraction of this. So here we have four workers, A, B, C, and D.
+
+109
+00:14:25,000 --> 00:14:35,000
+And what we're going to do is assume that there are multiple weights. So perhaps here we have weight vectors with elements zero through four.
+
+110
+00:14:35,000 --> 00:14:44,000
+And of course, on workers A, B, C, and D, we can take different subsets of the training data, compute losses, and compute gradients for each of our weights.
+
+111
+00:14:44,000 --> 00:14:51,000
+So suppose these are the values for the gradients. Of course, they're not likely to be integers like this, but we're just abstracting.
+
+112
+00:14:51,000 --> 00:15:12,000
+How do we actually coordinate all of these things? What we want to do is effectively sum all of the zeroth elements and then divide by four to compute an average, then sum all of the one elements, divide by four and compute an average, and so on for all these values.
+
+113
+00:15:12,000 --> 00:15:28,000
+So we could send everything to a central coordinator, but that doesn't scale super well. So instead, what we're going to do is leverage a technique that helps us simplify the computation.
+
+114
+00:15:28,000 --> 00:15:40,000
+So this is a very interesting technique. This is called all reduce and more specifically ring all reduce. It was invented by scientists at Baidu.
+
+115
+00:15:40,000 --> 00:15:50,000
+And the basic idea is that we're going to take our different workers and we're going to imagine there's a communication ring among all of them.
+
+116
+00:15:50,000 --> 00:15:56,000
+So worker A can send data to B, B to C, C to D, and D back to A.
+
+117
+00:15:56,000 --> 00:16:09,000
+So we're going to have each of the workers have each of the workers share some of its data with the next worker and ideally do this in a way that minimizes the number of network transmissions and the amount of data sent.
+
+118
+00:16:09,000 --> 00:16:17,000
+So rather than A sending all of its data to B and B sending all of its data to C and so on, we're going to come up with a slightly more clever approach.
+
+119
+00:16:17,000 --> 00:16:24,000
+So we're going to be effectively an origin for each of the weights in the weight vector.
+
+120
+00:16:24,000 --> 00:16:35,000
+And we're going to start a computation, summing up all of the, for instance, zeroth weights is going to start at worker A.
+
+121
+00:16:35,000 --> 00:16:42,000
+Element one is going to start at worker B.
+
+122
+00:16:42,000 --> 00:16:46,000
+Element two at C and element three at D.
+
+123
+00:16:46,000 --> 00:16:48,000
+Now let's see how this works.
+
+124
+00:16:48,000 --> 00:17:00,000
+A is going to send A0 to B, B is going to send C is going to send C2 to D, and D is going to send D3 to A.
+
+125
+00:17:00,000 --> 00:17:07,000
+Recall that A was the starting point for zero, B for one, C for two, and D for three.
+
+126
+00:17:07,000 --> 00:17:16,000
+So that's the first step. Essentially now worker B will have enough data that it can sum the incoming A0 with its own B0.
+
+127
+00:17:16,000 --> 00:17:27,000
+So it is going to send a message this way, which is going to have A0 plus B0.
+
+128
+00:17:27,000 --> 00:17:37,000
+Worker C is going to have B1, which it can sum with C1,
+
+129
+00:17:37,000 --> 00:17:48,000
+which it does and sends to worker D. D gets C2 plus D2,
+
+130
+00:17:48,000 --> 00:17:52,000
+gets A3 plus D3.
+
+131
+00:17:52,000 --> 00:18:02,000
+Then each of the workers can now take the incoming two values and add their third value.
+
+132
+00:18:02,000 --> 00:18:08,000
+So if I look at worker C gets as input A0 plus B0, it can add C0.
+
+133
+00:18:08,000 --> 00:18:14,000
+Send an extra message here.
+
+134
+00:18:14,000 --> 00:18:19,000
+A0 plus B0 plus C0.
+
+135
+00:18:19,000 --> 00:18:23,000
+Worker D gets B1 plus C1.
+
+136
+00:18:23,000 --> 00:18:29,000
+So it can do B1 plus C1 plus B1 and so on and so forth.
+
+137
+00:18:29,000 --> 00:18:35,000
+And eventually a copy of all of the vectors.
+
+138
+00:18:35,000 --> 00:18:39,000
+So that's the basic approach.
+
+139
+00:18:39,000 --> 00:18:50,000
+AllReduce is a pretty effective way of coordination in the most complicated of training,
+
+140
+00:18:50,000 --> 00:18:52,000
+which is the adjustments to the weight vector.
+
+141
+00:18:52,000 --> 00:18:55,000
+PyTorch under the covers is a data flow engine that onto this.
+
+142
+00:18:55,000 --> 00:19:02,000
+We can shard our individual matrices or tensors across different machines
+
+143
+00:19:02,000 --> 00:19:07,000
+and process them in feedforward using multiple GPUs and multiple computers.
+
+144
+00:19:07,000 --> 00:19:12,000
+When we need to do backpropagation, we can use techniques like Ring AllReduce
+
+145
+00:19:12,000 --> 00:19:17,000
+to minimize the communication as we do weight updates.
+
+146
+00:19:17,000 --> 00:19:25,000
+And essentially through many rounds Horovod does feedforward backpropagation,
+
+147
+00:19:25,000 --> 00:19:32,000
+feedforward backpropagation until it converges on a final answer,
+
+148
+00:19:32,000 --> 00:19:34,000
+which is the learned machine learning model.
+
+149
+00:19:34,000 --> 00:19:37,000
+So now we know how to scale up deep neural networks,
+
+150
+00:19:37,000 --> 00:19:39,000
+large computations across compute clusters.
+
+151
+00:19:39,000 --> 00:19:42,000
+Horovod is widely used across many tech companies,
+
+152
+00:19:42,000 --> 00:19:49,000
+including Uber and Meta, and works over very, very large models and very, very large data sets.
+

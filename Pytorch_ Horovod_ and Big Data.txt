@@ -1,0 +1,141 @@
+When deep neural networks were first proposed, the notion of using a GPU to help train neural networks at scale over hundreds of millions of images or bits of text was itself considered a really, really big data problem.
+But over time, we've gotten a lot more ambitious. Today, as people are trying to build GPT-3 and GPT-4 and other large language models or train over huge amounts of video data, etc., they've had to move beyond single GPU training to many GPUs often on a computer cluster.
+So we'll talk briefly about some of the key ideas behind scale up and a package called Horovod in this next segment.
+Before we do that, it's worth recalling how it is that we tend to scale up computation over large amounts of data.
+We saw really two main ideas. Both of them are here to take advantage of the fact that we might have multiple CPUs or multiple GPUs or multiple hardware or all of the above.
+And they're all seeking to allow each of these independent processing units to work in parallel on different pieces of the problem without doing too much communication.
+So we saw sharding where we take our input data and we split it, usually row-wise, across different computers on a network, and then we allow different machines to execute programs or more specifically queries independently in parallel.
+We also saw a second technique, which was single instruction multiple data or SIMD, which are commonly called vector instructions, where we can specify one computation to do over batches of records or values and their special hardware to do things in parallel.
+Both of these are based on this notion that we express our computation using high level bulk operations that can be parallelized in some particular way.
+Some of these operations can be done fully in parallel. Some of them require a bit of synchronization.
+And for that, let's recall how we do SQL query evaluation.
+Recall that when we have an SQL query or a pandas program, we break it into a tree of operators, an expression, which looks something like this.
+We have a selection followed by a join, followed by a group by, and each of these operators works over tables, but in fact, it tends to work over individual rows of the tables or collections thereof.
+So you'll recall that the select operator had this nice property that it could be done independently and in parallel across every single tuple in the input relation.
+So we could scale this with as many processors or as many cores or ultimately as many machines as we might like.
+Join was slightly more constrained.
+We can do portions of the join in parallel, but all of the values from our A and B relations that have the same join keys have to go to the same machine, and it has to work on all of them together.
+So we have a lot of parallelism, but it's based on join key values instead of individual tuples.
+Then we had group by, which was kind of similar to join.
+It can be done independently, but independently across individual groups.
+Every set of tuples with the same grouping key generally in the abstract needs to be done in one operation, and we can only parallelize across the groups.
+So we saw how to take advantage of that in Apache Spark and similar systems using the notion of repartitioning or sharding or the exchange operator, depending on how to talk about it.
+Some people also call this shuffle.
+So here's an example of our query now running across two different computers.
+I'm drawing a line across to show where the different computers are.
+So the different computers are, they're each executing the same evaluation plan.
+And so we start with a select.
+In this case, the select is going to operate on different regions of our data from our input A.
+And of course, different regions can be selected in parallel, producing a series of sub results.
+Then in turn, if my data is partitioned correctly on the join key, perhaps we can actually do a join between that result and some portion of some other table B, which also has to be aligned correctly on the join key.
+That produces some intermediate results that we see here.
+And similarly on the second machine, we will get the same thing.
+Now, if we want to do a group by on a grouping key that is not our join key, then we need to do this repartition operation that we see in between shuffling data back and forth across these machines until all of the G values that match end up at one machine or the other machine.
+And so now the grouping can be done in parallel across different groups on our different machine.
+So that's how things work for SQL.
+Do we have a similar notion of high level operations for neural networks?
+Well, fortunately, we actually do.
+If you think about our neural networks in general, they have a series of layers.
+Maybe this is layer one, which is comprised of a series of operations where we take our input matrix.
+This is our training data, let's say.
+And we take a series of weights.
+So this is the weight vector for activation unit one, which is right here.
+Activation unit one really has a dot product followed by an activation function, in this case, ReLU.
+And then we're going to have another one of these happening in parallel for a different activation unit, another activation unit, and so on.
+So all of these produce different columns in an output matrix, which then gets fed into layer two, which again has activation units comprised of dot product followed by activation function.
+And this proceeds through multiple layers.
+So the feed forward computation consists of a series of dot product ReLU, dot product ReLU, dot product ReLU stages in this particular neural network.
+Of course, the ReLU could be some other activation function like sigmoid in the general case.
+So that's great.
+Can we map this to something parallelizable?
+Fortunately, the answer is yes.
+Fortunately, the answer is yes.
+This is where PyTorch and TensorFlow and MXNet work by default on a single GPU.
+And Horovod will help us parallelize across multiple GPUs and multiple machines.
+Essentially, all of these platforms under the covers implement specific computation engines that propagate tensors from operation to operation.
+And they map these down to special hardware, things like your GPU or parallel vector instructions in CPUs.
+The individual stages of the computation can be split up, kind of akin to sharding, or they can be computed in a series of pipelines where the different multiplications can all be happening simultaneously.
+And for instance, the outputs of layer number one are fed any pipeline to the simultaneously executing stage number two or layer number two, and so on.
+So we have both the sort of pipeline version, pipeline to parallelism, and we have different rows and columns, which is kind of equivalent to sharding.
+In either case, as we saw from the previous example, the feedforward step prediction is fairly natural.
+And in fact, it can be done with lots of computations in parallel, for instance, using multiple rows of the training data at the same time to do multiple predictions at once.
+So what makes this much more complicated, though, is we don't just have this feedforward computation.
+Rather, we have backpropagation.
+And what is backpropagation involved? Well, basically, the output, let's suppose we're looking at this one, the output of our deep neural network eventually goes to an activation unit, which then makes a prediction, which we could call y hat
+of one here,
+and y hat of two here. And of course, what's going to happen is we take our prediction, we compare it to the actual label from our training data.
+Then, based on the error, we compute a loss, and then the loss gets backpropagated through radiant descent type methods, through backpropagation, all the way through our network.
+So that is the more complicated part of this computation. Let's see how we can actually make this work at scale.
+So for that, I'm going to excerpt just one stage and one activation unit from this network so we can see this dashed here.
+If we zoom in, then we can think about this particular activation unit as contributing to some arbitrary number of layers in our neural network.
+So if we're just going to show all the layer two, layer three, and so on as a big cloud, essentially this activation unit ultimately contributes to some particular prediction.
+And of course, it might be more than one prediction, but let's assume for the moment, we're just doing one prediction. So that's our y hat.
+Then we compare it at the output stage against the actual y, that becomes the loss, then through the auto differentiation features of our machine learning toolkit.
+We convert from the loss to a series of gradients, one for each weight, that is done by figuring out the partial derivatives.
+Then from the gradients, we take our step size and we use that to compute an adjustment on the weights for every single activation unit.
+So here we see the kind of total loop from our original training data and weights all the way around through the output of the activation unit, through the rest of the neural network, back into an adjustment to the weights and so on.
+So we have this loop.
+Now let's excerpt away a little bit more and instead of showing the loss functions, look at there being an output from this particular activation unit, and then an adjustment to the weights comes from somewhere downstream.
+If we want to now think about computing in parallel, different parts of our training data, training input here,
+and into two different subsets. So essentially I'm going to take half of my training data and put it on machine number one, and half of my data, and I'm going to train using the same neural network and the same weights.
+So how might this work?
+Well, basically, we take our initial shard up here.
+We just create the same neural network as we see before, and what we're going to do is take the output of this stage, feed it into all the downstream layers, and then compute a loss.
+And in fact, we're going to compute the loss and an autograd for this first half of the picture above.
+And in parallel, we're going to do the same thing for the second half of the picture below.
+And now there's going to be a different loss based on xshard zero versus xshard one.
+And we can also compute over each of those a gradient using autograd.
+And what we're typically going to do is compute those different gradients on our two different halves of this computation separately.
+They're each going to be done, in fact, on a separate computer.
+Now we need to update the weights on machine zero and machine one so that they are the same.
+We're trying to do the same computation with the same weights on two machines.
+So to do that, we're going to take our different gradients computed on each of these machines and average the gradients across everything and apply our weight update based on those averages and update all the copies of our weight vector.
+So that's the basic idea. We do sharded computation effectively over different parts of the training data all the way through all the stages of the computation.
+Then we compute a gradient for each partition. Then we average those gradients.
+We use that to adjust our weights. We adjust them consistently across all the machines and we repeat.
+So now we've gone from one GPU or one machine to more than one.
+So how does this work across multiple computers? Well, for Apache Spark, what we did was we had the different machines communicate to a limited extent under the management of a coordinator.
+And they generally shuffle data around using sharding or repartition techniques.
+For distributed computation and coordination in a training loop, we're not so worried about sharding data based on values.
+But what we have to do is in parallel compute losses and gradients across different subsets of our training data, then average them in a consistent way across all of the data, and then propagate the updates to all of the machines for the next training epic.
+So how might this work? Well, let's take a simplified abstraction of this. So here we have four workers A, B, C, and D.
+And what we're going to do is assume that there are multiple weights. So perhaps here we have weight vectors with elements zero through four.
+And of course, on workers A, B, C, and D, we can take different subsets of the training data, compute losses, and compute gradients for each of our weights.
+So suppose these are the values for the gradients. Of course, they're not likely to be integers like this, but we're just abstracting.
+How do we actually coordinate all of these things? What we want to do is effectively sum all of the zeroth elements and then divide by four to compute an average, then sum all of the one elements, divide by four and compute an average, and so on for all these values.
+So we could send everything to a central coordinator, but that doesn't scale super well. So instead, what we're going to do is leverage a technique that helps us simplify the computation.
+So this is a very interesting technique. This is called allreduce, and more specifically ring allreduce. It was invented by scientists at Baidu.
+And the basic idea is that we're going to take our different workers and we're going to imagine there's a communication ring among all of them.
+So worker A can send data to B, B to C, C to D, and D back to A.
+And then we're going to have each of the workers have each of the workers share some of its data with the next worker, and ideally do this in a way that minimizes the number of network transmissions and the amount of data sent.
+So rather than A sending all of its data to B and B sending all of its data to C and so on, we're going to come up with a slightly more clever approach.
+So this is going to be effectively an origin for each of the weights in the weight vector.
+And we're going to start a computation, summing up all of the, for instance, zeroth weights is going to start at worker A.
+Element one is going to start at worker B.
+Element two at C and element three at D.
+Now let's see how this works.
+A is going to send A0 to B, B is going to send C is going to send C2 to D, and D is going to send D3 to A.
+Recall that A was the starting point for zero, B for one, C for two, and D for three.
+So that's the first step. Essentially now worker B will have enough data that it can sum the incoming A0 with its own B0.
+So it is going to send a message this way, which is going to have A0 plus B0.
+Worker C is going to have B1, which it can sum with C1,
+which it does and sends to worker D. D gets C2 plus D2,
+gets A3 plus D3.
+Then each of the workers can now take the incoming two values and add their third value.
+So if I look at worker C gets as input A0 plus B0, it can add C0.
+Send an extra message here.
+A0 plus B0 plus C0.
+Worker D gets B1 plus C1, so it can do B1 plus C1 plus B1, and so on and so forth.
+And eventually a copy of all of the vectors.
+So that's the basic approach.
+AllReduce is a pretty effective way of coordination in the most complicated of training,
+which is the adjustments to the weight vector. PyTorch under the covers is a data flow engine.
+On to this, we can shard our individual matrices or tensors across different machines
+and process them in feedforward using multiple GPUs and multiple computers.
+When we need to do backpropagation, we can use techniques like RingAllReduce to minimize the communication
+as we do weight updates. And essentially through many rounds, Horovod does feedforward,
+backpropagation, feedforward, backpropagation until it converges on a final answer,
+which is the learned machine learning model.
+So now we know how to scale up deep neural networks, large computations across compute clusters.
+Horovod is widely used across many tech companies, including Uber and Meta,
+and works over very, very large models and very, very large data sets.
